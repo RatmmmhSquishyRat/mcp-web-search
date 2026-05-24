@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc -p .",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "tsx --test test/*.test.ts",
     "start": "node dist/src/server.js",
     "dev": "tsx src/server.ts",
     "format": "prettier --write \"src/**/*.ts\"",

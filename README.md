@@ -274,14 +274,13 @@ Reddit public JSON can still rate-limit or return 403/429 depending on Reddit, s
 
 ## Environment Variables
 
-| Variable                          | Default                 | Description                                                                                                                                    |
-| --------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_SEARCH_PROVIDER`         | `duckduckgo`            | Default search provider: `duckduckgo`, `bing`, or `searxng`                                                                                    |
-| `SEARXNG_URL`                     | `http://localhost:8099` | SearXNG instance URL                                                                                                                           |
-| `HTTP_TIMEOUT`                    | `15000`                 | Request timeout in milliseconds                                                                                                                |
-| `MAX_BYTES`                       | `20971520`              | Maximum fetched response/download size                                                                                                         |
-| `MCP_COMPAT_MODE`                 | unset                   | Set to `legacy` to simplify `tools/list` schemas for MCP clients with weak discovery parsers                                                   |
-| `FETCH_URL_ALLOWED_FAKE_IP_CIDRS` | unset                   | Comma-separated IPv4 CIDRs within `198.18.0.0/15` that may appear only as DNS results for public hostnames in transparent proxy fake-IP DNS setups |
+| Variable                  | Default                 | Description                                                                                  |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| `DEFAULT_SEARCH_PROVIDER` | `duckduckgo`            | Default search provider: `duckduckgo`, `bing`, or `searxng`                                  |
+| `SEARXNG_URL`             | `http://localhost:8099` | SearXNG instance URL                                                                         |
+| `HTTP_TIMEOUT`            | `15000`                 | Request timeout in milliseconds                                                              |
+| `MAX_BYTES`               | `20971520`              | Maximum fetched response/download size                                                       |
+| `MCP_COMPAT_MODE`         | unset                   | Set to `legacy` to simplify `tools/list` schemas for MCP clients with weak discovery parsers |
 
 ## SearXNG Setup
 
@@ -353,15 +352,7 @@ Blocked targets include:
 
 The HTTP transport resolves and validates addresses before connecting, then connects to the vetted address while preserving the original host/SNI for normal HTTPS behavior.
 
-Transparent proxy setups such as Clash/Mihomo TUN fake-IP DNS may resolve public hostnames to a local fake-IP pool, commonly `198.18.0.0/15`. Keep the default blocked behavior unless you run such an environment, then opt in with:
-
-```bash
-export FETCH_URL_ALLOWED_FAKE_IP_CIDRS="198.18.0.0/15"
-```
-
-This only allows those addresses when they are DNS results for an otherwise safe hostname. Direct URLs such as `http://198.18.0.130/` remain blocked.
-
-Malformed entries, broad ranges, and ranges outside `198.18.0.0/15` are ignored.
+Transparent proxy setups such as Clash/Mihomo TUN fake-IP DNS may resolve public hostnames to a local fake-IP pool, commonly `198.18.0.0/15`. `fetch_url` treats that range as a DNS-only fake-IP compatibility case for otherwise safe hostnames, while direct URLs such as `http://198.18.0.130/` remain blocked.
 
 ## Repository Structure
 

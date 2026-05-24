@@ -2,13 +2,24 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
 import { fetchAndExtract } from "../src/extract.js";
+import { setDnsLookupForTests, type DnsLookup } from "../src/fetch/security.js";
 import { fetchCache } from "../src/utils/cache.js";
 
 function testTransport(handler: (url: URL) => Response | Promise<Response>) {
   return async (url: URL) => handler(url);
 }
+
+const publicResolver: DnsLookup = async () => [{ address: "93.184.216.34" }];
+
+beforeEach(() => {
+  setDnsLookupForTests(publicResolver);
+});
+
+afterEach(() => {
+  setDnsLookupForTests(null);
+});
 
 async function tempDir() {
   return await mkdtemp(join(tmpdir(), "mcp-web-search-test-"));
