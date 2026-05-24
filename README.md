@@ -281,7 +281,7 @@ Reddit public JSON can still rate-limit or return 403/429 depending on Reddit, s
 | `HTTP_TIMEOUT`                    | `15000`                 | Request timeout in milliseconds                                                                                                                |
 | `MAX_BYTES`                       | `20971520`              | Maximum fetched response/download size                                                                                                         |
 | `MCP_COMPAT_MODE`                 | unset                   | Set to `legacy` to simplify `tools/list` schemas for MCP clients with weak discovery parsers                                                   |
-| `FETCH_URL_ALLOWED_FAKE_IP_CIDRS` | unset                   | Comma-separated IPv4 CIDRs that may appear only as DNS results for public hostnames, for transparent proxy fake-IP DNS such as `198.18.0.0/15` |
+| `FETCH_URL_ALLOWED_FAKE_IP_CIDRS` | unset                   | Comma-separated IPv4 CIDRs within `198.18.0.0/15` that may appear only as DNS results for public hostnames in transparent proxy fake-IP DNS setups |
 
 ## SearXNG Setup
 
@@ -360,6 +360,8 @@ export FETCH_URL_ALLOWED_FAKE_IP_CIDRS="198.18.0.0/15"
 ```
 
 This only allows those addresses when they are DNS results for an otherwise safe hostname. Direct URLs such as `http://198.18.0.130/` remain blocked.
+
+Malformed entries, broad ranges, and ranges outside `198.18.0.0/15` are ignored.
 
 ## Repository Structure
 

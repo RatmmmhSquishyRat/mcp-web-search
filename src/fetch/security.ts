@@ -3,6 +3,14 @@ import net, { BlockList } from "node:net";
 
 const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain"]);
 const FAKE_IP_CIDRS_ENV = "FETCH_URL_ALLOWED_FAKE_IP_CIDRS";
+const FAKE_IP_RANGE_START = ipv4ToNumber([198, 18, 0, 0]);
+const FAKE_IP_RANGE_END = ipv4ToNumber([198, 19, 255, 255]);
+
+let cachedFakeIpCidrs: { raw: string; blockList: BlockList } | null = null;
+
+function ipv4ToNumber(parts: number[]): number {
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
 
 function parseIPv4(address: string): number[] | null {
   const parts = address.split(".").map(Number);
@@ -12,18 +20,50 @@ function parseIPv4(address: string): number[] | null {
   return parts;
 }
 
+function cidrRange(address: string, prefix: number): { start: number; end: number } | null {
+  const parts = parseIPv4(address);
+  if (!parts) return null;
+
+  const ip = ipv4ToNumber(parts);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const start = (ip & mask) >>> 0;
+  const end = (start | (~mask >>> 0)) >>> 0;
+  return { start, end };
+}
+
+function isAllowedFakeIpCidr(address: string, prefix: number): boolean {
+  const range = cidrRange(address, prefix);
+  return !!range && range.start >= FAKE_IP_RANGE_START && range.end <= FAKE_IP_RANGE_END;
+}
+
 function configuredFakeIpBlockList(): BlockList {
+  const raw = process.env[FAKE_IP_CIDRS_ENV] || "";
+  if (cachedFakeIpCidrs?.raw === raw) return cachedFakeIpCidrs.blockList;
+
   const blockList = new BlockList();
 
-  for (const item of (process.env[FAKE_IP_CIDRS_ENV] || "").split(",")) {
-    const [address, prefixText] = item.trim().split("/");
+  for (const item of raw.split(",")) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    const parts = trimmed.split("/");
+    if (parts.length !== 2 || !parts[0] || !/^\d+$/.test(parts[1])) continue;
+
+    const [address, prefixText] = parts;
     const prefix = Number(prefixText);
-    if (net.isIP(address || "") !== 4 || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    if (
+      net.isIP(address) !== 4 ||
+      !Number.isInteger(prefix) ||
+      prefix <= 0 ||
+      prefix > 32 ||
+      !isAllowedFakeIpCidr(address, prefix)
+    ) {
       continue;
     }
     blockList.addSubnet(address, prefix, "ipv4");
   }
 
+  cachedFakeIpCidrs = { raw, blockList };
   return blockList;
 }
 
@@ -48,6 +88,22 @@ function isIPv4Private(address: string): boolean {
 function mappedIPv4(address: string): string | null {
   const normalized = address.toLowerCase();
   const dotted = normalized.match(/(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/)?.[1];
+  if (dotted && net.isIP(dotted) === 4) return dotted;
+
+  const hex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (!hex) return null;
+
+  const high = Number.parseInt(hex[1], 16);
+  const low = Number.parseInt(hex[2], 16);
+  if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
+  return `${(high >> 8) & 255}.${high & 255}.${(low >> 8) & 255}.${low & 255}`;
+}
+
+function fakeIpComparableIPv4(address: string): string | null {
+  if (net.isIP(address) === 4) return address;
+
+  const normalized = address.toLowerCase();
+  const dotted = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)?.[1];
   if (dotted && net.isIP(dotted) === 4) return dotted;
 
   const hex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
@@ -88,8 +144,8 @@ export function isPrivateAddress(address: string): boolean {
 }
 
 export function isConfiguredFakeIpAddress(address: string): boolean {
-  const ipv4 = mappedIPv4(address) || address;
-  if (net.isIP(ipv4) !== 4) return false;
+  const ipv4 = fakeIpComparableIPv4(address);
+  if (!ipv4) return false;
   return configuredFakeIpBlockList().check(ipv4, "ipv4");
 }
 
