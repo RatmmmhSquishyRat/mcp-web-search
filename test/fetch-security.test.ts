@@ -32,6 +32,8 @@ test("configured fake-IP CIDRs can be allowed for resolved public hostnames", ()
     assert.equal(isPrivateAddress("198.18.0.130"), true);
     assert.equal(isConfiguredFakeIpAddress("198.18.0.130"), true);
     assert.equal(isBlockedResolvedAddress("198.18.0.130"), false);
+    assert.equal(isConfiguredFakeIpAddress("::ffff:198.18.0.130"), true);
+    assert.equal(isBlockedResolvedAddress("::ffff:198.18.0.130"), false);
   } finally {
     if (previous === undefined) {
       delete process.env.FETCH_URL_ALLOWED_FAKE_IP_CIDRS;

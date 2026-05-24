@@ -1,10 +1,8 @@
 import { lookup } from "node:dns/promises";
-import net from "node:net";
+import net, { BlockList } from "node:net";
 
 const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain"]);
 const FAKE_IP_CIDRS_ENV = "FETCH_URL_ALLOWED_FAKE_IP_CIDRS";
-
-type IPv4Cidr = { base: number; mask: number };
 
 function parseIPv4(address: string): number[] | null {
   const parts = address.split(".").map(Number);
@@ -14,35 +12,19 @@ function parseIPv4(address: string): number[] | null {
   return parts;
 }
 
-function ipv4ToNumber(address: string): number | null {
-  const parts = parseIPv4(address);
-  if (!parts) return null;
-  return parts.reduce((value, part) => (value << 8) + part, 0) >>> 0;
-}
+function configuredFakeIpBlockList(): BlockList {
+  const blockList = new BlockList();
 
-function parseIPv4Cidr(cidr: string): IPv4Cidr | null {
-  const [address, prefixText] = cidr.trim().split("/");
-  if (!address || prefixText === undefined) return null;
+  for (const item of (process.env[FAKE_IP_CIDRS_ENV] || "").split(",")) {
+    const [address, prefixText] = item.trim().split("/");
+    const prefix = Number(prefixText);
+    if (net.isIP(address || "") !== 4 || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+      continue;
+    }
+    blockList.addSubnet(address, prefix, "ipv4");
+  }
 
-  const base = ipv4ToNumber(address);
-  const prefix = Number(prefixText);
-  if (base === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
-
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  return { base: base & mask, mask };
-}
-
-function configuredFakeIpCidrs(): IPv4Cidr[] {
-  return (process.env[FAKE_IP_CIDRS_ENV] || "")
-    .split(",")
-    .map(item => parseIPv4Cidr(item))
-    .filter((item): item is IPv4Cidr => item !== null);
-}
-
-function isIPv4InCidr(address: string, cidr: IPv4Cidr): boolean {
-  const value = ipv4ToNumber(address);
-  if (value === null) return false;
-  return (value & cidr.mask) === cidr.base;
+  return blockList;
 }
 
 function isIPv4Private(address: string): boolean {
@@ -107,7 +89,8 @@ export function isPrivateAddress(address: string): boolean {
 
 export function isConfiguredFakeIpAddress(address: string): boolean {
   const ipv4 = mappedIPv4(address) || address;
-  return configuredFakeIpCidrs().some(cidr => isIPv4InCidr(ipv4, cidr));
+  if (net.isIP(ipv4) !== 4) return false;
+  return configuredFakeIpBlockList().check(ipv4, "ipv4");
 }
 
 export function isBlockedHostname(hostname: string): boolean {
