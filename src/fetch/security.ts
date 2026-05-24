@@ -2,16 +2,29 @@ import { lookup } from "node:dns/promises";
 import net from "node:net";
 
 const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain"]);
-const FAKE_IP_RANGE_START = ipv4ToNumber([198, 18, 0, 0]);
-const FAKE_IP_RANGE_END = ipv4ToNumber([198, 19, 255, 255]);
+const FAKE_IP_CIDRS_ENV = "FETCH_URL_ALLOWED_FAKE_IP_CIDRS";
+const BENCHMARK_FAKE_IP_RANGE = cidrRange("198.18.0.0", 15);
+const SENSITIVE_FAKE_IP_RANGES = [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["224.0.0.0", 4]
+] as const;
 
 type LookupRecord = { address: string };
+type IPv4Range = { start: number; end: number };
 export type DnsLookup = (
   hostname: string,
   options: { all: true; verbatim: true }
 ) => Promise<LookupRecord[]>;
 
 let dnsLookup: DnsLookup = lookup;
+let cachedFakeIpCidrs: { raw: string; ranges: IPv4Range[] } | null = null;
 
 export function setDnsLookupForTests(resolver: DnsLookup | null): void {
   dnsLookup = resolver ?? lookup;
@@ -34,9 +47,67 @@ function ipv4AddressToNumber(address: string): number | null {
   return parts ? ipv4ToNumber(parts) : null;
 }
 
-function isKnownFakeIpV4(address: string): boolean {
+function cidrRange(address: string, prefix: number): IPv4Range | null {
   const value = ipv4AddressToNumber(address);
-  return value !== null && value >= FAKE_IP_RANGE_START && value <= FAKE_IP_RANGE_END;
+  if (value === null) return null;
+
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const start = (value & mask) >>> 0;
+  const end = (start | (~mask >>> 0)) >>> 0;
+  return { start, end };
+}
+
+function rangesOverlap(a: IPv4Range, b: IPv4Range): boolean {
+  return a.start <= b.end && b.start <= a.end;
+}
+
+function isAllowedFakeIpRange(range: IPv4Range): boolean {
+  if (
+    BENCHMARK_FAKE_IP_RANGE &&
+    rangesOverlap(range, BENCHMARK_FAKE_IP_RANGE) &&
+    (range.start < BENCHMARK_FAKE_IP_RANGE.start || range.end > BENCHMARK_FAKE_IP_RANGE.end)
+  ) {
+    return false;
+  }
+
+  for (const [address, prefix] of SENSITIVE_FAKE_IP_RANGES) {
+    const sensitive = cidrRange(address, prefix);
+    if (sensitive && rangesOverlap(range, sensitive)) return false;
+  }
+  return true;
+}
+
+function configuredFakeIpRanges(): IPv4Range[] {
+  const raw = process.env[FAKE_IP_CIDRS_ENV] || "";
+  if (cachedFakeIpCidrs?.raw === raw) return cachedFakeIpCidrs.ranges;
+
+  const ranges: IPv4Range[] = [];
+  for (const item of raw.split(",")) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    const parts = trimmed.split("/");
+    if (parts.length !== 2 || !parts[0] || !/^\d+$/.test(parts[1])) continue;
+
+    const [address, prefixText] = parts;
+    const prefix = Number(prefixText);
+    if (net.isIP(address) !== 4 || !Number.isInteger(prefix) || prefix <= 0 || prefix > 32) {
+      continue;
+    }
+
+    const range = cidrRange(address, prefix);
+    if (!range || !isAllowedFakeIpRange(range)) continue;
+    ranges.push(range);
+  }
+
+  cachedFakeIpCidrs = { raw, ranges };
+  return ranges;
+}
+
+function isConfiguredFakeIpV4(address: string): boolean {
+  const value = ipv4AddressToNumber(address);
+  if (value === null) return false;
+  return configuredFakeIpRanges().some(range => value >= range.start && value <= range.end);
 }
 
 function parseIPv6Segments(address: string): number[] | null {
@@ -143,10 +214,10 @@ export function isPrivateAddress(address: string): boolean {
   return false;
 }
 
-export function isKnownFakeIpAddress(address: string): boolean {
+export function isConfiguredFakeIpAddress(address: string): boolean {
   const ipv4 = fakeIpComparableIPv4(address);
   if (!ipv4) return false;
-  return isKnownFakeIpV4(ipv4);
+  return isConfiguredFakeIpV4(ipv4);
 }
 
 export function isBlockedHostname(hostname: string): boolean {
@@ -158,7 +229,7 @@ export function isBlockedHostname(hostname: string): boolean {
 }
 
 export function isBlockedResolvedAddress(address: string): boolean {
-  return isPrivateAddress(address) && !isKnownFakeIpAddress(address);
+  return isPrivateAddress(address) && !isConfiguredFakeIpAddress(address);
 }
 
 export async function resolveSafeAddresses(hostname: string): Promise<string[]> {
