@@ -1,11 +1,41 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
 import { fetchAndExtract } from "../src/extract.js";
+import { setDnsLookupForTests, type DnsLookup } from "../src/fetch/security.js";
 import { fetchCache } from "../src/utils/cache.js";
 
 function testTransport(handler: (url: URL) => Response | Promise<Response>) {
   return async (url: URL) => handler(url);
 }
+
+const publicResolver: DnsLookup = async () => [{ address: "93.184.216.34" }];
+
+async function withFakeIpCidrs<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
+  const previous = process.env.FETCH_URL_ALLOWED_FAKE_IP_CIDRS;
+  if (value === undefined) {
+    delete process.env.FETCH_URL_ALLOWED_FAKE_IP_CIDRS;
+  } else {
+    process.env.FETCH_URL_ALLOWED_FAKE_IP_CIDRS = value;
+  }
+
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.FETCH_URL_ALLOWED_FAKE_IP_CIDRS;
+    } else {
+      process.env.FETCH_URL_ALLOWED_FAKE_IP_CIDRS = previous;
+    }
+  }
+}
+
+beforeEach(() => {
+  setDnsLookupForTests(publicResolver);
+});
+
+afterEach(() => {
+  setDnsLookupForTests(null);
+});
 
 function clearFetchCache() {
   fetchCache.clear();
@@ -175,6 +205,44 @@ test("fetchAndExtract rejects localhost before network fetch", async () => {
   }
 });
 
+test("fetchAndExtract accepts deterministic fake-IP DNS results", async () => {
+  setDnsLookupForTests(async () => [{ address: "198.18.0.130" }]);
+  let fetchCount = 0;
+  const transport = testTransport(() => {
+    fetchCount += 1;
+    return new Response("ok", {
+      status: 200,
+      headers: { "Content-Type": "text/plain", "Content-Length": "2" }
+    });
+  });
+
+  try {
+    const result = await withFakeIpCidrs("198.18.0.0/15", () =>
+      fetchAndExtract("https://example.com/fake-ip.txt", { format: "text" }, transport)
+    );
+    assert.equal(result.content, "ok");
+    assert.equal(fetchCount, 1);
+  } finally {
+    clearFetchCache();
+  }
+});
+
+test("fetchAndExtract rejects deterministic private DNS results before network fetch", async () => {
+  setDnsLookupForTests(async () => [{ address: "10.0.0.1" }]);
+  const transport = testTransport(() => {
+    throw new Error("network should not be called");
+  });
+
+  try {
+    await assert.rejects(
+      () => fetchAndExtract("https://example.com/private-dns.txt", {}, transport),
+      /Blocked localhost\/private URL/
+    );
+  } finally {
+    clearFetchCache();
+  }
+});
+
 test("fetchAndExtract rejects unsafe redirects before following them", async () => {
   const requests: string[] = [];
   const transport = testTransport(url => {
@@ -191,6 +259,29 @@ test("fetchAndExtract rejects unsafe redirects before following them", async () 
       /Blocked localhost\/private URL/
     );
     assert.deepEqual(requests, ["https://example.com/redirect"]);
+  } finally {
+    clearFetchCache();
+  }
+});
+
+test("fetchAndExtract rejects redirects to direct fake-IP URLs", async () => {
+  const requests: string[] = [];
+  const transport = testTransport(url => {
+    requests.push(url.toString());
+    return new Response(null, {
+      status: 302,
+      headers: { Location: "http://198.18.0.130/private" }
+    });
+  });
+
+  try {
+    await withFakeIpCidrs("198.18.0.0/15", () =>
+      assert.rejects(
+        () => fetchAndExtract("https://example.com/redirect-fake-ip", {}, transport),
+        /Blocked localhost\/private URL/
+      )
+    );
+    assert.deepEqual(requests, ["https://example.com/redirect-fake-ip"]);
   } finally {
     clearFetchCache();
   }

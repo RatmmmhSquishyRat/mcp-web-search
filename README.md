@@ -274,13 +274,14 @@ Reddit public JSON can still rate-limit or return 403/429 depending on Reddit, s
 
 ## Environment Variables
 
-| Variable                  | Default                 | Description                                                                                  |
-| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
-| `DEFAULT_SEARCH_PROVIDER` | `duckduckgo`            | Default search provider: `duckduckgo`, `bing`, or `searxng`                                  |
-| `SEARXNG_URL`             | `http://localhost:8099` | SearXNG instance URL                                                                         |
-| `HTTP_TIMEOUT`            | `15000`                 | Request timeout in milliseconds                                                              |
-| `MAX_BYTES`               | `20971520`              | Maximum fetched response/download size                                                       |
-| `MCP_COMPAT_MODE`         | unset                   | Set to `legacy` to simplify `tools/list` schemas for MCP clients with weak discovery parsers |
+| Variable                          | Default                 | Description                                                                                  |
+| --------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| `DEFAULT_SEARCH_PROVIDER`         | `duckduckgo`            | Default search provider: `duckduckgo`, `bing`, or `searxng`                                  |
+| `SEARXNG_URL`                     | `http://localhost:8099` | SearXNG instance URL                                                                         |
+| `HTTP_TIMEOUT`                    | `15000`                 | Request timeout in milliseconds                                                              |
+| `MAX_BYTES`                       | `20971520`              | Maximum fetched response/download size                                                       |
+| `MCP_COMPAT_MODE`                 | unset                   | Set to `legacy` to simplify `tools/list` schemas for MCP clients with weak discovery parsers |
+| `FETCH_URL_ALLOWED_FAKE_IP_CIDRS` | unset                   | Comma-separated fake-IP CIDRs to allow only as DNS results for otherwise safe hostnames      |
 
 ## SearXNG Setup
 
@@ -351,6 +352,14 @@ Blocked targets include:
 - redirects that resolve to blocked addresses
 
 The HTTP transport resolves and validates addresses before connecting, then connects to the vetted address while preserving the original host/SNI for normal HTTPS behavior.
+
+Transparent proxy setups such as Clash/Mihomo TUN fake-IP DNS may resolve public hostnames to a local fake-IP pool, commonly `198.18.0.0/15`. Default URL safety remains strict. If your MCP runtime is inside such an environment, explicitly declare the proxy's fake-IP range:
+
+```bash
+export FETCH_URL_ALLOWED_FAKE_IP_CIDRS="198.18.0.0/15"
+```
+
+Configured fake-IP CIDRs are allowed only when they appear as DNS results for otherwise safe hostnames. Direct URLs such as `http://198.18.0.130/` remain blocked, and malformed or sensitive ranges are ignored.
 
 ## Repository Structure
 
